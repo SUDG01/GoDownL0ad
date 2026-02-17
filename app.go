@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"sync"
+	"sync/atomic"
 
 	"strconv"
 
@@ -31,12 +33,18 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
+func (c *WriteCounter) Add(n uint64) {
+	newCurrent := atomic.AddUint64(&c.Current, n)
+	persentage := float64(newCurrent) / float64(c.Total) * 100
+	runtime.EventsEmit(c.Ctx, "download_progress", persentage)
+}
+
 // Greet returns a greeting for the given name
 func (a *App) DownloadDemo(url string) string {
 	//发起下载请求
-	resp, err := http.Get(url)
+	resp, err := http.Head(url)
 	if err != nil {
-		return "下载失败！"
+		return "获取文件信息失败：" + err.Error()
 	}
 	defer resp.Body.Close()
 
@@ -57,12 +65,19 @@ func (a *App) DownloadDemo(url string) string {
 	filename := finalFileName
 	out, err := os.Create(filename)
 	if err != nil {
-		return "创建文件失败，请检查文件权限."
+		return "创建文件失败"
 	}
 	defer out.Close()
 
 	//获取文件大小
-	filesize, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
+	filesize, err := strconv.Atoi(resp.Header.Get("Content-Length"))
+	if filesize <= 0 {
+		return "获取文件大小失败" + err.Error()
+	}
+
+	//配置
+	threadCount := 5
+	partSize := filesize / threadCount
 
 	//获取进度
 	counter := &WriteCounter{
@@ -70,11 +85,29 @@ func (a *App) DownloadDemo(url string) string {
 		Ctx:   a.ctx,
 	}
 
+	var wg sync.WaitGroup
+
 	//开始下载
-	if _, err = io.Copy(out, io.TeeReader(resp.Body, counter)); err != nil {
-		return "写入失败" + err.Error()
+	for i := 0; i < threadCount; i++ {
+		//计算起始位置和结束位置
+		start := i * partSize
+		end := start + partSize - 1
+
+		if i == threadCount-1 {
+			end = filesize - 1
+		}
+
+		wg.Add(1)
+
+		go func(threadID int, startPos, endPos int) {
+			defer wg.Done()
+			a.downloadPart(url, out, startPos, endPos, counter)
+		}(i, start, end)
 	}
-	return "下载完成！文件位置：" + filename
+
+	wg.Wait()
+
+	return fmt.Sprintf("下载完成! 大小：%d MB", filesize/1024/1024)
 }
 
 type WriteCounter struct {
@@ -117,4 +150,37 @@ func (a *App) ParseFileName(downloadUrl string) string {
 	}
 
 	return decodedName
+}
+
+func (a *App) downloadPart(url string, file *os.File, start, end int, counter *WriteCounter) {
+	req, _ := http.NewRequest("GET", url, nil)
+
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Printf("下载失败: %v\n", err)
+	}
+	defer resp.Body.Close()
+
+	buf := make([]byte, 32*1024)
+	currentOffset := int64(start)
+
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			file.WriteAt(buf[:n], currentOffset)
+			//更新偏移
+			currentOffset += int64(n)
+			//更新总进度
+			counter.Add(uint64(n))
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			fmt.Printf("读取错误： %v\n", err)
+			break
+		}
+	}
 }
