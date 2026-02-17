@@ -11,6 +11,7 @@ import (
 	"path"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"strconv"
 
@@ -76,7 +77,7 @@ func (a *App) DownloadDemo(url string) string {
 	}
 
 	//配置
-	threadCount := 5
+	threadCount := 10
 	partSize := filesize / threadCount
 
 	//获取进度
@@ -86,6 +87,31 @@ func (a *App) DownloadDemo(url string) string {
 	}
 
 	var wg sync.WaitGroup
+
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+
+		lastBytes := uint64(0)
+
+		for {
+			select {
+			case <-ticker.C:
+				currentBytes := atomic.LoadUint64(&counter.Current)
+				speed := currentBytes - lastBytes
+
+				lastBytes = currentBytes
+
+				runtime.EventsEmit(a.ctx, "download_speed", speed)
+
+				if currentBytes >= counter.Total {
+					return
+				}
+			case <-a.ctx.Done():
+				return
+			}
+		}
+	}()
 
 	//开始下载
 	for i := 0; i < threadCount; i++ {
