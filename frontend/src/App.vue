@@ -38,7 +38,7 @@ function startTask() {
 
 <template>
   <div class="container">
-    <h1>🚀 极速下载器 Demo</h1>
+    <h1>GoDownL0ad Demo</h1>
     
     <div class="input-group">
       <input v-model="data.url" placeholder="输入下载链接" />
