@@ -1,0 +1,4 @@
+[    1655ms] ReferenceError: sj_evt is not defined
+    at https://www.bing.com/:6:531
+[    8938ms] [ERROR] Permissions policy violation: unload is not allowed in this document. @ https://assets.msn.com/bundles/v1/bingHomepage/latest/microsoft.cee969d2411a30c2a80a.js:86
+[    8938ms] [ERROR] Permissions policy violation: unload is not allowed in this document. @ https://assets.msn.com/bundles/v1/bingHomepage/latest/microsoft.cee969d2411a30c2a80a.js:86
